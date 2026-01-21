@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>POS Inventory PWA — MVP</title>
+
+  <!-- Manifest & PWA -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0ea5a4">
+
+  <!-- Fonts (Bangla + Latin) -->
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CDN for quick UI (for production compile recommended) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- External libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.5.0/dist/axios.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.8/dayjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
+
+  <style>
+    body { font-family: Inter, 'Noto Sans Bengali', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+    .bn { font-family: 'Noto Sans Bengali', sans-serif; }
+    /* simple responsive layout */
+    .app { max-width:1100px; margin:0 auto; padding:1rem; }
+    .card { background:#fff; border-radius:.5rem; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+    .small { font-size:.85rem; color:#666; }
+    .btn { @apply px-3 py-2 rounded bg-sky-500 text-white hover:bg-sky-600;}
+  </style>
+</head>
+<body class="bg-slate-50">
+  <div class="app">
+    <header class="flex items-center justify-between mb-4">
+      <div>
+        <h1 class="text-2xl font-semibold">POS Inventory — Mini</h1>
+        <div class="small">BDT • BN/EN • Offline-first • Encrypted backup</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="localeToggle" class="border rounded px-2 py-1">
+          <option value="en">EN</option>
+          <option value="bn">বাংলা</option>
+        </select>
+        <button id="backupBtn" class="btn">Export (Encrypted)</button>
+        <button id="importBtn" class="px-3 py-2 rounded border">Import</button>
+        <button id="registerSw" class="px-3 py-2 rounded border">Register SW</button>
+      </div>
+    </header>
+
+    <main class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <!-- LEFT: Product Management -->
+      <section class="card md:col-span-1">
+        <h2 class="font-semibold">Products</h2>
+        <form id="productForm" class="mt-2 space-y-2">
+          <input id="sku" placeholder="SKU" class="w-full border rounded px-2 py-1" />
+          <input id="name_en" placeholder="Name (EN)" class="w-full border rounded px-2 py-1" />
+          <input id="name_bn" placeholder="Name (BN)" class="w-full border rounded px-2 py-1 bn" />
+          <div class="flex gap-2">
+            <input id="category" placeholder="Category" class="flex-1 border rounded px-2 py-1" />
+            <input id="brand" placeholder="Brand" class="w-32 border rounded px-2 py-1" />
+          </div>
+          <div class="flex gap-2">
+            <input id="unit" placeholder="Unit (pcs/kg)" class="flex-1 border rounded px-2 py-1" />
+            <input id="reorder_level" type="number" placeholder="Reorder" class="w-32 border rounded px-2 py-1" />
+          </div>
+          <div class="flex gap-2">
+            <input id="price" type="number" placeholder="Sale Price (BDT)" class="flex-1 border rounded px-2 py-1" />
+            <input id="cost" type="number" placeholder="Cost" class="w-36 border rounded px-2 py-1" />
+          </div>
+          <div class="flex gap-2">
+            <button class="btn" id="addProduct">Add / Update</button>
+            <button class="px-3 py-2 rounded border" id="seedProduct">Seed sample</button>
+          </div>
+        </form>
+
+        <div class="mt-4">
+          <input id="productSearch" placeholder="Search products..." class="w-full border rounded px-2 py-1" />
+          <ul id="productList" class="mt-2 space-y-2 max-h-56 overflow-auto"></ul>
+        </div>
+      </section>
+
+      <!-- MIDDLE: Cart & Billing -->
+      <section class="card md:col-span-1">
+        <h2 class="font-semibold">Cart / Billing</h2>
+        <div class="flex gap-2 mt-2">
+          <input id="scanBarcode" placeholder="Scan barcode / type SKU" class="flex-1 border rounded px-2 py-1" />
+          <button id="scanCamera" class="px-3 py-2 rounded border">Camera</button>
+        </div>
+
+        <table class="w-full mt-3 text-sm">
+          <thead class="small text-left text-slate-600">
+            <tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr>
+          </thead>
+          <tbody id="cartItems" class="divide-y"></tbody>
+        </table>
+
+        <div class="mt-3">
+          <div class="flex justify-between small"><span>Subtotal</span><span id="subtotal">BDT 0</span></div>
+          <div class="flex justify-between small"><span>Discount</span><span id="discount">BDT 0</span></div>
+          <div class="flex justify-between font-semibold text-lg"><span>Total</span><span id="total">BDT 0</span></div>
+
+          <div class="mt-2 flex gap-2">
+            <button id="payCash" class="btn">Pay (Cash)</button>
+            <button id="paySplit" class="px-3 py-2 rounded border">Split</button>
+            <button id="printInvoice" class="px-3 py-2 rounded border">Print A4</button>
+            <button id="printThermal" class="px-3 py-2 rounded border">Thermal</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: Dashboard / Reports -->
+      <section class="card md:col-span-1">
+        <h2 class="font-semibold">Dashboard</h2>
+        <div class="mt-2">
+          <canvas id="salesChart" height="120"></canvas>
+        </div>
+        <div class="mt-3">
+          <h3 class="font-medium">Quick Reports</h3>
+          <ul class="mt-2 small">
+            <li>Top sellers (by qty)</li>
+            <li>Low stock</li>
+            <li>Customer dues</li>
+          </ul>
+        </div>
+        <div class="mt-3">
+          <h3 class="font-medium">Audit Log</h3>
+          <div id="auditList" class="max-h-40 overflow-auto small mt-2"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Hidden elements for barcode & camera -->
+    <div id="barcodeSvg" class="hidden"></div>
+    <video id="videoPreview" class="hidden w-full" autoplay muted playsinline></video>
+  </div>
+
+  <!-- Templates / Modal placeholders -->
+  <template id="productItemTemplate">
+    <li class="flex items-center justify-between p-2 border rounded">
+      <div>
+        <div class="font-medium name"></div>
+        <div class="small sku"></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="px-2 py-1 rounded border edit">Edit</button>
+        <button class="px-2 py-1 rounded border addtocart">Add</button>
+      </div>
+    </li>
+  </template>
+
+  <script type="module">
+  // ---------- Simple i18n dictionary ----------
+  const I18N = {
+    en: { total: 'Total', subtotal:'Subtotal', productAdded:'Product saved', backupReady:'Backup ready' },
+    bn: { total: 'মোট', subtotal:'সাবটোটাল', productAdded:'প্রোডাক্ট সংরক্ষিত', backupReady:'ব্যাকআপ প্রস্তুত' }
+  };
+  let LOCALE = localStorage.getItem('locale') || 'en';
+
+  // ---------- Utility: Currency formatting ----------
+  function fmtBDT(amount) {
+    return new Intl.NumberFormat(LOCALE==='bn' ? 'bn-BD' : 'en-BD', { style:'currency', currency:'BDT', maximumFractionDigits:2 }).format(amount || 0);
+  }
+
+  // ---------- IndexedDB wrapper with migrations ----------
+  const DB_NAME = 'pos-db';
+  const DB_VERSION = 3; // bump for future schema changes
+  let db;
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const rq = indexedDB.open(DB_NAME, DB_VERSION);
+      rq.onupgradeneeded = (e) => {
+        const idb = e.target.result;
+        const old = e.oldVersion;
+        // migrations by version
+        if (old < 1) {
+          const p = idb.createObjectStore('products', { keyPath:'id', autoIncrement:true });
+          p.createIndex('sku', 'sku', { unique:true });
+          idb.createObjectStore('variants', { keyPath:'id', autoIncrement:true });
+          idb.createObjectStore('invoices', { keyPath:'id', autoIncrement:true });
+          idb.createObjectStore('payments', { keyPath:'id', autoIncrement:true });
+          idb.createObjectStore('customers', { keyPath:'id', autoIncrement:true });
+          idb.createObjectStore('audit', { keyPath:'id', autoIncrement:true });
+        }
+        if (old < 2) {
+          const p = rq.transaction.objectStore('products');
+          // add new fields via migration marker (no schema enforce)
+        }
+        if (old < 3) {
+          idb.createObjectStore('sync_meta', { keyPath:'key' });
+        }
+      };
+      rq.onsuccess = () => { db = rq.result; resolve(db); };
+      rq.onerror = () => reject(rq.error);
+    });
+  }
+
+  async function tx(storeName, mode='readonly', fn) {
+    if (!db) await openDB();
+    return new Promise((res, rej) => {
+      const t = db.transaction(storeName, mode);
+      const s = t.objectStore(storeName);
+      fn(s, t);
+      t.oncomplete = () => res();
+      t.onerror = () => rej(t.error);
+    });
+  }
+
+  async function addProduct(obj) {
+    if (!db) await openDB();
+    return new Promise((res, rej) => {
+      const t = db.transaction('products','readwrite');
+      const s = t.objectStore('products');
+      // upsert by sku
+      const idx = s.index('sku');
+      const rq = idx.get(obj.sku);
+      rq.onsuccess = () => {
+        const exist = rq.result;
+        if (exist) {
+          const merged = {...exist, ...obj, updatedAt: new Date().toISOString()};
+          s.put(merged);
+          logAudit('product:update', merged.id, exist, merged);
+          res(merged);
+        } else {
+          obj.createdAt = new Date().toISOString();
+          obj.updatedAt = obj.createdAt;
+          const addRq = s.add(obj);
+          addRq.onsuccess = () => {
+            obj.id = addRq.result;
+            logAudit('product:create', obj.id, null, obj);
+            res(obj);
+          };
+          addRq.onerror = () => rej(addRq.error);
+        }
+      };
+      rq.onerror = () => rej(rq.error);
+    });
+  }
+
+  async function getAllProducts() {
+    if (!db) await openDB();
+    return new Promise((res, rej) => {
+      const t = db.transaction('products','readonly');
+      const s = t.objectStore('products');
+      const all = s.getAll();
+      all.onsuccess = () => res(all.result || []);
+      all.onerror = () => rej(all.error);
+    });
+  }
+
+  async function logAudit(action, entityId, before, after) {
+    const entry = { action, entityId, before, after, actor:'local', timestamp: new Date().toISOString() };
+    if (!db) await openDB();
+    const t = db.transaction('audit','readwrite');
+    const s = t.objectStore('audit');
+    s.add(entry);
+  }
+
+  // ---------- Simple in-memory cart ----------
+  const CART = [];
+  function recalcCart() {
+    const subtotal = CART.reduce((s,i)=>s + (i.qty * i.price),0);
+    const discount = 0;
+    const total = subtotal - discount;
+    document.getElementById('subtotal').textContent = fmtBDT(subtotal);
+    document.getElementById('discount').textContent = fmtBDT(discount);
+    document.getElementById('total').textContent = fmtBDT(total);
+    const tbody = document.getElementById('cartItems');
+    tbody.innerHTML = '';
+    CART.forEach((it, idx) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${LOCALE==='bn' ? (it.name_bn || it.name) : it.name}</td>
+                      <td>${it.qty}</td>
+                      <td>${fmtBDT(it.price)}</td>
+                      <td>${fmtBDT(it.qty * it.price)}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ---------- UI wiring ----------
+  document.getElementById('localeToggle').value = LOCALE;
+  document.getElementById('localeToggle').addEventListener('change', (e) => {
+    LOCALE = e.target.value;
+    localStorage.setItem('locale', LOCALE);
+    recalcCart();
+    renderProducts();
+  });
+
+  document.getElementById('addProduct').addEventListener('click', async (e) => {
+    e.preventDefault();
+    const p = {
+      sku: document.getElementById('sku').value.trim() || ('SKU-'+Date.now()),
+      name: document.getElementById('name_en').value.trim(),
+      name_bn: document.getElementById('name_bn').value.trim(),
+      category: document.getElementById('category').value.trim(),
+      brand: document.getElementById('brand').value.trim(),
+      unit: document.getElementById('unit').value.trim(),
+      reorder_level: Number(document.getElementById('reorder_level').value || 0),
+      price: Number(document.getElementById('price').value || 0),
+      cost: Number(document.getElementById('cost').value || 0),
+      status: 'active'
+    };
+    const saved = await addProduct(p);
+    alert(I18N[LOCALE].productAdded);
+    renderProducts();
+  });
+
+  document.getElementById('seedProduct').addEventListener('click', async (e) => {
+    e.preventDefault();
+    // insert sample product
+    const sample = { sku:'PROD001', name:'Green Chili', name_bn:'কাঁচা মরিচ', category:'Grocery', brand:'Local', unit:'kg', price:120, cost:80, reorder_level:5 };
+    try { await addProduct(sample); } catch(e) { /* ignore duplicate */ }
+    renderProducts();
+  });
+
+  async function renderProducts(filter='') {
+    const list = document.getElementById('productList');
+    list.innerHTML = '';
+    const all = await getAllProducts();
+    const filtered = all.filter(p=>!filter || p.name.toLowerCase().includes(filter.toLowerCase()) || (p.sku || '').includes(filter));
+    const tpl = document.getElementById('productItemTemplate');
+    filtered.forEach(p=>{
+      const node = tpl.content.cloneNode(true);
+      node.querySelector('.name').textContent = LOCALE==='bn' ? (p.name_bn || p.name) : p.name;
+      node.querySelector('.sku').textContent = p.sku + ' • ' + fmtBDT(p.price);
+      node.querySelector('.edit').addEventListener('click', ()=> populateEdit(p));
+      node.querySelector('.addtocart').addEventListener('click', ()=> addToCart(p));
+      list.appendChild(node);
+    });
+  }
+
+  function populateEdit(p) {
+    document.getElementById('sku').value = p.sku;
+    document.getElementById('name_en').value = p.name;
+    document.getElementById('name_bn').value = p.name_bn || '';
+    document.getElementById('category').value = p.category || '';
+    document.getElementById('brand').value = p.brand || '';
+    document.getElementById('unit').value = p.unit || '';
+    document.getElementById('reorder_level').value = p.reorder_level || 0;
+    document.getElementById('price').value = p.price || 0;
+    document.getElementById('cost').value = p.cost || 0;
+  }
+
+  function addToCart(p) {
+    const found = CART.find(c=>c.sku === p.sku);
+    if (found) found.qty++;
+    else CART.push({ sku:p.sku, name:p.name, name_bn:p.name_bn, price:p.price || 0, qty:1 });
+    recalcCart();
+  }
+
+  document.getElementById('productSearch').addEventListener('input', (e)=> renderProducts(e.target.value));
+
+  // Scan barcode / add by SKU
+  document.getElementById('scanBarcode').addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      const sku = e.target.value.trim();
+      if (!sku) return;
+      const all = await getAllProducts();
+      const p = all.find(x=>x.sku === sku);
+      if (p) addToCart(p);
+      else alert('SKU not found');
+      e.target.value = '';
+    }
+  });
+
+  // Camera scanning using ZXing
+  const codeReader = new ZXing.BrowserMultiFormatReader();
+  document.getElementById('scanCamera').addEventListener('click', async () => {
+    const video = document.getElementById('videoPreview');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode:'environment' }});
+      video.srcObject = stream;
+      video.classList.remove('hidden');
+      const result = await codeReader.decodeOnceFromVideoDevice(undefined, video);
+      if (result && result.text) {
+        const sku = result.text.trim();
+        const all = await getAllProducts();
+        const p = all.find(x=>x.sku === sku);
+        if (p) addToCart(p);
+        else alert('Scanned: '+sku);
+      }
+      stream.getTracks().forEach(t=>t.stop());
+      video.classList.add('hidden');
+    } catch(err) {
+      alert('Camera scan failed: ' + err);
+    }
+  });
+
+  // Payment flow (simple cash)
+  document.getElementById('payCash').addEventListener('click', async () => {
+    const total = CART.reduce((s,i)=>s + (i.qty*i.price),0);
+    if (total <= 0) return alert('Cart empty');
+    // create invoice & payment record
+    if (!db) await openDB();
+    const inv = { items: CART.map(i=>({sku:i.sku, qty:i.qty, price:i.price})), subtotal: total, total, createdAt: new Date().toISOString(), type:'sale' };
+    const t = db.transaction(['invoices','payments'],'readwrite');
+    const invStore = t.objectStore('invoices');
+    const payStore = t.objectStore('payments');
+    const rq = invStore.add(inv);
+    rq.onsuccess = () => {
+      const invId = rq.result;
+      payStore.add({ invoiceId:invId, method:'cash', amount: total, timestamp: new Date().toISOString() });
+      logAudit('invoice:create', invId, null, inv);
+      CART.length = 0;
+      recalcCart();
+      alert('Paid: ' + fmtBDT(total));
+      renderProducts();
+      renderAudit();
+    };
+  });
+
+  // Printing: A4 via window.print using a temp HTML
+  document.getElementById('printInvoice').addEventListener('click', () => {
+    const total = CART.reduce((s,i)=>s + (i.qty*i.price),0);
+    const html = `
+      <html><head><title>Invoice</title><style>body{font-family:Arial;padding:20px}table{width:100%}</style></head>
+      <body><h1>Invoice</h1><div>Date: ${new Date().toLocaleString()}</div>
+      <table border="1" cellspacing="0" cellpadding="6"><tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr>
+      ${CART.map(i=>`<tr><td>${i.name}</td><td>${i.qty}</td><td>${i.price}</td><td>${(i.qty*i.price).toFixed(2)}</td></tr>`).join('')}
+      <tr><td colspan="3"><strong>Total</strong></td><td><strong>${total.toFixed(2)}</strong></td></tr></table></body></html>`;
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
+    w.print();
+  });
+
+  // Thermal printer placeholder using WebUSB (very device-specific)
+  document.getElementById('printThermal').addEventListener('click', async () => {
+    alert('Thermal print: This is a placeholder. Implement ESC/POS via WebUSB or server-side printer adapter.');
+    // Example: navigator.usb.requestDevice({ filters: [...] })
+    // then send ESC/POS bytes
+  });
+
+  // ---------- Encrypted export/import (AES-GCM) ----------
+  async function deriveKeyFromPassphrase(passphrase, salt) {
+    const enc = new TextEncoder();
+    const baseKey = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({
+      name: 'PBKDF2',
+      salt: salt,
+      iterations: 250000,
+      hash: 'SHA-256'
+    }, baseKey, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+  }
+
+  async function exportEncrypted(passphrase) {
+    // gather all stores
+    if (!db) await openDB();
+    const allData = {};
+    const names = Array.from(db.objectStoreNames);
+    for (const n of names) {
+      allData[n] = await new Promise((res,rej)=> {
+        const t = db.transaction(n,'readonly'); const s = t.objectStore(n);
+        const rq = s.getAll();
+        rq.onsuccess = ()=>res(rq.result); rq.onerror = ()=>rej(rq.error);
+      });
+    }
+    const json = JSON.stringify({ exportedAt:new Date().toISOString(), db:allData });
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveKeyFromPassphrase(passphrase, salt);
+    const enc = new TextEncoder();
+    const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, enc.encode(json));
+    // package as blob: salt + iv + ciphertext
+    const payload = new Uint8Array(salt.byteLength + iv.byteLength + ct.byteLength);
+    payload.set(salt, 0); payload.set(iv, salt.byteLength); payload.set(new Uint8Array(ct), salt.byteLength + iv.byteLength);
+    const blob = new Blob([payload], { type:'application/octet-stream' });
+    return blob;
+  }
+
+  document.getElementById('backupBtn').addEventListener('click', async () => {
+    const pass = prompt('Enter backup passphrase (do not forget)');
+    if (!pass) return alert('Cancelled');
+    try {
+      const blob = await exportEncrypted(pass);
+      saveAs(blob, 'pos-backup.bin');
+      alert(I18N[LOCALE].backupReady);
+    } catch(err) { alert('Export failed: '+err); }
+  });
+
+  // Import (decrypt) file input dialog
+  document.getElementById('importBtn').addEventListener('click', async () => {
+    const input = document.createElement('input'); input.type='file'; input.accept='*/*';
+    input.onchange = async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const pass = prompt('Enter passphrase to decrypt');
+      if (!pass) return;
+      const arr = new Uint8Array(await f.arrayBuffer());
+      const salt = arr.slice(0,16);
+      const iv = arr.slice(16,28);
+      const ct = arr.slice(28);
+      try {
+        const key = await deriveKeyFromPassphrase(pass, salt);
+        const pt = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, ct);
+        const dec = new TextDecoder().decode(pt);
+        const payload = JSON.parse(dec);
+        // basic restore: write each store - NOTE: this naive restore will NOT handle conflicts; production requires careful merge
+        if (!db) await openDB();
+        for (const [storeName, items] of Object.entries(payload.db)) {
+          await tx(storeName, 'readwrite', (s)=> {
+            items.forEach(it => s.put(it));
+          });
+        }
+        alert('Import complete (basic). Check data integrity.');
+        renderProducts(); renderAudit();
+      } catch(err){ alert('Import/decrypt failed: '+err) }
+    };
+    input.click();
+  });
+
+  // ---------- Simple chart & audit rendering ----------
+  let salesChart;
+  async function renderDashboard() {
+    const ctx = document.getElementById('salesChart').getContext('2d');
+    const labels = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const data = { labels, datasets:[{ label:'Sales (BDT)', data: labels.map(()=>Math.random()*5000+1000), backgroundColor:'rgba(14,165,164,0.2)', borderColor:'#0ea5a4'}] };
+    if (salesChart) salesChart.destroy();
+    salesChart = new Chart(ctx, { type:'line', data, options:{ responsive:true } });
+  }
+
+  async function renderAudit() {
+    if (!db) await openDB();
+    const t = db.transaction('audit','readonly');
+    const s = t.objectStore('audit');
+    const rq = s.getAll();
+    rq.onsuccess = () => {
+      const out = rq.result || [];
+      const el = document.getElementById('auditList');
+      el.innerHTML = out.slice().reverse().map(a=>`<div class="small border-b py-1"><strong>${a.action}</strong> • ${new Date(a.timestamp).toLocaleString()}<div class="small">${a.entityId}</div></div>`).join('');
+    };
+  }
+
+  // ---------- Service worker registration hook ----------
+  document.getElementById('registerSw').addEventListener('click', async () => {
+    if ('serviceWorker' in navigator) {
+      try {
+        await navigator.serviceWorker.register('/sw.js');
+        alert('Service worker registered');
+      } catch(err){ alert('SW register failed: '+err); }
+    } else alert('Service workers not supported');
+  });
+
+  // initial load
+  (async ()=>{ await openDB(); renderProducts(); renderDashboard(); renderAudit(); recalcCart(); })();
+
+  </script>
+</body>
+</html>
